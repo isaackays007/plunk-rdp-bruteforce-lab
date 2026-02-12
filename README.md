@@ -1,23 +1,24 @@
-splunk-rdp-bruteforce-lab – Windows RDP Brute-Force Detection Lab (Splunk)
+# splunk-rdp-bruteforce-lab – Windows RDP Brute-Force Detection Lab (Splunk)
 
 Built a home lab using Windows and Kali VMs with Splunk ingesting Security logs to detect RDP brute‑force attacks. Developed SPL rules that aggregate 4625 failures and correlate them with 4624 successes to identify suspicious login behavior and potential account compromise.
 
-Overview
+## Overview
+
 This project demonstrates end‑to‑end detection engineering for Remote Desktop Protocol (RDP) brute‑force attacks using Windows Security Event logs and Splunk. It covers attack simulation, log ingestion, SPL detections, and alerting suitable for a SOC or blue‑team workflow.
 
-Lab Architecture
+## Lab Architecture
 
-Windows VM (target): RDP enabled, generating WinEventLog:Security events (Event IDs 4624 and 4625).
+- Windows VM (target): RDP enabled, generating WinEventLog:Security events (Event IDs 4624 and 4625).
+- Kali Linux VM (attacker): uses xfreerdp to perform repeated RDP login attempts (failed and successful).
+- Splunk instance: indexes Windows Security logs in index=main, sourcetype=WinEventLog:Security, and runs scheduled detections.
 
-Kali Linux VM (attacker): uses xfreerdp to perform repeated RDP login attempts (failed and successful).
+## Data Generation
 
-Splunk instance: indexes Windows Security logs in index=main, sourcetype=WinEventLog:Security, and runs scheduled detections.
-
-Data Generation
 From Kali, generate repeated failed RDP logins:
 
+```bash
 for i in {1..20}; do
-xfreerdp /u:Zikayz /p:'wrongpass' /v:192.168.1.250 /cert:ignore
+  xfreerdp /u:Zikayz /p:'wrongpass' /v:192.168.1.250 /cert:ignore
 done
 
 Optionally, follow with one successful login using the correct password to model a successful compromise.
@@ -29,7 +30,19 @@ index=main sourcetype=WinEventLog:Security (EventCode=4624 OR EventCode=4625)
 | sort - _time
 | head 30
 
-Detections (SPL)
+## Detections (SPL)
+
+Raw SPL for these detections is also available in the `detections/` folder (for example, `detections/rdp_bruteforce_attempts.spl`).
+
+### RDP brute-force attempts (failures only)
+
+```spl
+index=main sourcetype=WinEventLog:Security EventCode=4625 Logon_Type=3
+| stats count as failed_attempts min(_time) as firstTime max(_time) as lastTime values(Account_Name) as accounts by Workstation_Name ComputerName
+| where failed_attempts >= 5
+| eval firstTime=strftime(firstTime, "%Y-%m-%d %H:%M:%S"), lastTime=strftime(lastTime, "%Y-%m-%d %H:%M:%S")
+| sort - failed_attempts
+```
 
 RDP brute-force attempts (failures only)
 Detects multiple failed RDP-style logons from a source to a host over a period of time.
@@ -59,6 +72,9 @@ by ComputerName, _time
 | where failed_count >= 3 AND success_count >= 1
 
 Alert Configuration
+
+In this home lab, the search is saved as a report due to the Splunk Free license; in production it would be scheduled as an alert.
+
 Example for the brute‑force attempts detection:
 
 Type: Scheduled search.
